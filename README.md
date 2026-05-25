@@ -1,4 +1,4 @@
-# Sovereign Vault — Bitcoin Biometric Identity
+#Bitcoin Biometric Identity
 
 A WebAuthn app that binds Bitcoin addresses to hardware fingerprint credentials. No passwords. No seed phrases. Your fingerprint *is* the key.
 
