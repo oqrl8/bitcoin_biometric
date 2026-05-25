@@ -1,0 +1,541 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: webauthn
+    description: WebAuthn biometric credential operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /webauthn/register/begin:
+    post:
+      operationId: beginRegistration
+      tags: [webauthn]
+      summary: Begin WebAuthn registration (Phase 1 - Issuance)
+      description: Generates a challenge and registration options for binding a Bitcoin address to a biometric credential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BeginRegistrationRequest"
+      responses:
+        "200":
+          description: Registration options to pass to WebAuthn API
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationOptions"
+        "400":
+          description: Invalid Bitcoin address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Bitcoin address already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /webauthn/register/complete:
+    post:
+      operationId: completeRegistration
+      tags: [webauthn]
+      summary: Complete WebAuthn registration (Phase 1 - Verification)
+      description: Verifies the attestation response from the authenticator and persists the credential binding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteRegistrationRequest"
+      responses:
+        "200":
+          description: Registration verified and credential bound to Bitcoin address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationResult"
+        "400":
+          description: Verification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /webauthn/authenticate/begin:
+    post:
+      operationId: beginAuthentication
+      tags: [webauthn]
+      summary: Begin WebAuthn authentication (Phase 2 - Proof)
+      description: Generates a fresh challenge incorporating the Bitcoin address for the assertion ceremony
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BeginAuthenticationRequest"
+      responses:
+        "200":
+          description: Authentication options to pass to WebAuthn API
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticationOptions"
+        "404":
+          description: Bitcoin address not registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /webauthn/authenticate/complete:
+    post:
+      operationId: completeAuthentication
+      tags: [webauthn]
+      summary: Complete WebAuthn authentication (Phase 2 - Cryptographic proof)
+      description: Verifies the assertion signature proving the user controls the biometric key bound to the Bitcoin address
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteAuthenticationRequest"
+      responses:
+        "200":
+          description: Ownership proven — signature verified against bound credential
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticationResult"
+        "400":
+          description: Verification failed or signature invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /webauthn/mock/register:
+    post:
+      operationId: mockRegister
+      tags: [webauthn]
+      summary: Register a simulated account without hardware biometric
+      description: >
+        Dev/simulation endpoint. Accepts a synthetic P-256 public key (SPKI,
+        base64) generated by SubtleCrypto client-side. Skips WebAuthn
+        attestation verification so the apply→eval message stream can be
+        simulated node-to-node without physical hardware.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MockRegisterRequest"
+      responses:
+        "200":
+          description: Mock account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MockRegisterResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /webauthn/link/generate:
+    post:
+      operationId: generateLink
+      tags: [webauthn]
+      summary: Generate a contingent link token from an existing account
+      description: >
+        Derives a one-time `linkToken` from Account A's credential.
+        The token is a partially applied function — when Account B registers
+        using it, their vault address is derived from its sha256 commitment,
+        making both accounts anonymously contingent on each other.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateLinkRequest"
+      responses:
+        "200":
+          description: Link token generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateLinkResult"
+        "404":
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /webauthn/credentials:
+    get:
+      operationId: listCredentials
+      tags: [webauthn]
+      summary: List all registered Bitcoin address bindings
+      description: Returns all Bitcoin addresses that have been bound to biometric credentials
+      responses:
+        "200":
+          description: List of registered credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialList"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    BeginRegistrationRequest:
+      type: object
+      properties:
+        bitcoinAddress:
+          type: string
+          description: The Bitcoin address to bind to the biometric credential
+          example: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"
+      required:
+        - bitcoinAddress
+
+    RegistrationOptions:
+      type: object
+      description: WebAuthn PublicKeyCredentialCreationOptions (JSON-serializable form)
+      properties:
+        challenge:
+          type: string
+          description: Base64url-encoded challenge
+        rp:
+          type: object
+          properties:
+            name:
+              type: string
+            id:
+              type: string
+          required: [name, id]
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            displayName:
+              type: string
+          required: [id, name, displayName]
+        pubKeyCredParams:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              alg:
+                type: number
+            required: [type, alg]
+        authenticatorSelection:
+          type: object
+        attestation:
+          type: string
+        timeout:
+          type: number
+        excludeCredentials:
+          type: array
+          items:
+            type: object
+      required: [challenge, rp, user, pubKeyCredParams]
+
+    MockRegisterRequest:
+      type: object
+      properties:
+        credentialId:
+          type: string
+          description: Synthetic credential ID (random hex UUID)
+        publicKeySpki:
+          type: string
+          description: SPKI-format P-256 public key, base64-encoded, generated by SubtleCrypto
+        linkToken:
+          type: string
+          description: Optional link token — when present this account is created as Node B (eval step)
+      required:
+        - credentialId
+        - publicKeySpki
+
+    MockRegisterResult:
+      type: object
+      properties:
+        vaultId:
+          type: string
+        credentialId:
+          type: string
+        linkedCommitment:
+          type: string
+          nullable: true
+        message:
+          type: string
+      required:
+        - vaultId
+        - credentialId
+        - message
+
+    GenerateLinkRequest:
+      type: object
+      properties:
+        bitcoinAddress:
+          type: string
+          description: The vault ID of Account A — the originator that will generate the link token
+      required:
+        - bitcoinAddress
+
+    GenerateLinkResult:
+      type: object
+      properties:
+        linkToken:
+          type: string
+          description: >
+            One-time token to share with Account B. Represents the partially applied
+            function — Account B's fingerprint scan completes ("evals") it into a bound address.
+        commitment:
+          type: string
+          description: sha256(linkToken) — the anonymous shared commitment stored by both accounts
+        derivedAccountId:
+          type: string
+          description: The vault ID that Account B will receive when they register with this token
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - linkToken
+        - commitment
+        - derivedAccountId
+        - expiresAt
+
+    CompleteRegistrationRequest:
+      type: object
+      properties:
+        bitcoinAddress:
+          type: string
+        challenge:
+          type: string
+          description: Base64url-encoded challenge generated client-side. If provided, the server skips the DB challenge lookup and verifies directly.
+        linkToken:
+          type: string
+          description: >
+            Optional. When provided, Account B is created as a contingent pair of the
+            account that generated this token. The vault ID is derived from the token's
+            commitment — eval(apply(credentialA)) = addressB.
+        attestationResponse:
+          type: object
+          description: The raw JSON credential object from navigator.credentials.create()
+          properties:
+            id:
+              type: string
+            rawId:
+              type: string
+            type:
+              type: string
+            response:
+              type: object
+              properties:
+                clientDataJSON:
+                  type: string
+                attestationObject:
+                  type: string
+              required: [clientDataJSON, attestationObject]
+          required: [id, rawId, type, response]
+      required:
+        - bitcoinAddress
+        - attestationResponse
+
+    RegistrationResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        credentialId:
+          type: string
+          description: The registered credential ID bound to the Bitcoin address
+        bitcoinAddress:
+          type: string
+        registeredAt:
+          type: string
+          format: date-time
+        message:
+          type: string
+      required:
+        - success
+        - credentialId
+        - bitcoinAddress
+        - registeredAt
+        - message
+
+    BeginAuthenticationRequest:
+      type: object
+      properties:
+        bitcoinAddress:
+          type: string
+          description: The Bitcoin address to prove ownership of
+      required:
+        - bitcoinAddress
+
+    AuthenticationOptions:
+      type: object
+      description: WebAuthn PublicKeyCredentialRequestOptions (JSON-serializable form)
+      properties:
+        challenge:
+          type: string
+        allowCredentials:
+          type: array
+          items:
+            type: object
+        userVerification:
+          type: string
+        timeout:
+          type: number
+        rpId:
+          type: string
+      required: [challenge]
+
+    CompleteAuthenticationRequest:
+      type: object
+      properties:
+        bitcoinAddress:
+          type: string
+        assertionResponse:
+          type: object
+          description: The raw JSON credential object from navigator.credentials.get()
+          properties:
+            id:
+              type: string
+            rawId:
+              type: string
+            type:
+              type: string
+            response:
+              type: object
+              properties:
+                clientDataJSON:
+                  type: string
+                authenticatorData:
+                  type: string
+                signature:
+                  type: string
+                userHandle:
+                  type: string
+              required: [clientDataJSON, authenticatorData, signature]
+          required: [id, rawId, type, response]
+      required:
+        - bitcoinAddress
+        - assertionResponse
+
+    AuthenticationResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        bitcoinAddress:
+          type: string
+        credentialId:
+          type: string
+        provenAt:
+          type: string
+          format: date-time
+        message:
+          type: string
+        newSignCount:
+          type: number
+          description: Updated authenticator sign counter (replay attack detection)
+      required:
+        - success
+        - bitcoinAddress
+        - credentialId
+        - provenAt
+        - message
+
+    CredentialSummary:
+      type: object
+      properties:
+        id:
+          type: number
+        bitcoinAddress:
+          type: string
+        credentialId:
+          type: string
+        registeredAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        signCount:
+          type: number
+        linkedCommitment:
+          type: string
+          nullable: true
+          description: >
+            sha256 commitment shared with the contingent pair account.
+            Non-null means this account is one half of an anonymous linked pair.
+      required:
+        - id
+        - bitcoinAddress
+        - credentialId
+        - registeredAt
+        - signCount
+
+    CredentialList:
+      type: object
+      properties:
+        credentials:
+          type: array
+          items:
+            $ref: "#/components/schemas/CredentialSummary"
+        total:
+          type: number
+      required:
+        - credentials
+        - total
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+        - message
